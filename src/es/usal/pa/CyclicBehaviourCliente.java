@@ -1,71 +1,79 @@
 package es.usal.pa;
 
 import java.io.IOException;
-import java.util.Scanner;
-
 import jade.core.behaviours.CyclicBehaviour;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
-import jade.lang.acl.UnreadableException;
 
 public class CyclicBehaviourCliente extends CyclicBehaviour
 {
-	protected static final Scanner scanner = new Scanner(System.in);
+    protected String[] respuestasInstancia;
+    protected int pasoActual = 0;
 
-	@Override
-	public void action()
-	{
-		// Iniciar el proceso de clasificación de una nueva seta
-		String conversationId = Utils.enviarMensaje(this.myAgent, "clasificar", "iniciar");
+    public CyclicBehaviourCliente(String respuestasStr)
+    {
+        super();
+        this.respuestasInstancia = respuestasStr.split(",");
+    }
 
-		if (conversationId == null) {
-			// Si el AgenteClasificador aún no está registrado en el DF, esperar un poco y reintentar
-			block(1000);
-			return;
-		}
+    @Override
+    public void action()
+    {
+        // 1. Iniciar la clasificación de una nueva seta
+        String conversationId = Utils.enviarMensaje(this.myAgent, "clasificar", "iniciar");
 
-		boolean clasificacionTerminada = false;
-		while (!clasificacionTerminada) {
-			// Esperar la pregunta o clasificación final correspondiente a esta conversación
-			MessageTemplate filtro = MessageTemplate.and(
-					MessageTemplate.and(
-							MessageTemplate.MatchOntology("ontologia"),
-							MessageTemplate.MatchPerformative(ACLMessage.INFORM)
-					),
-					MessageTemplate.MatchConversationId(conversationId)
-			);
+        if (conversationId == null) {
+            block(1000);
+            return;
+        }
 
-			ACLMessage msg = this.myAgent.blockingReceive(filtro);
+        boolean clasificacionTerminada = false;
+        pasoActual = 0; // Reiniciamos los pasos para la nueva seta
 
-			try {
-				String contenido = (String) msg.getContentObject();
+        while (!clasificacionTerminada) {
+            // Filtrar mensajes de esta conversación concreta
+            MessageTemplate filtro = MessageTemplate.and(
+                    MessageTemplate.and(
+                            MessageTemplate.MatchOntology("ontologia"),
+                            MessageTemplate.MatchPerformative(ACLMessage.INFORM)
+                    ),
+                    MessageTemplate.MatchConversationId(conversationId)
+            );
 
-				// Si el mensaje es la clasificación final ("e" o "p"), la imprimimos y terminamos esta seta
-				if (contenido.equals("e") || contenido.equals("p")) {
-					synchronized (scanner) {
-						System.out.println("[" + this.myAgent.getLocalName() + "] Clasificación " + contenido);
-					}
-					clasificacionTerminada = true;
-				} else {
-					// Es una pregunta del árbol: mostrarla por pantalla y leer respuesta (s/n)
-					String respuesta;
-					synchronized (scanner) {
-						System.out.println("[" + this.myAgent.getLocalName() + "] Responde (s/n): " + contenido);
-						if (!scanner.hasNextLine()) {
-							return;
-						}
-						respuesta = scanner.nextLine();
-					}
+            ACLMessage msg = this.myAgent.blockingReceive(filtro);
 
-					ACLMessage reply = msg.createReply();
-					reply.setPerformative(ACLMessage.REQUEST);
-					reply.setContentObject(respuesta);
-					this.myAgent.send(reply);
-				}
-			} catch (UnreadableException | IOException e) {
-				e.printStackTrace();
-				clasificacionTerminada = true;
-			}
-		}
-	}
+            if (msg != null) {
+                String contenido = msg.getContent();
+
+                // Si es la clasificación final ("e" o "p")
+                if (contenido.equals("e") || contenido.equals("p")) {
+                    System.out.println(">>> [" + this.myAgent.getLocalName() + "] Clasificación obtenida: " + contenido);
+                    clasificacionTerminada = true;
+                } else {
+                    // Es una pregunta del árbol (ej: "odor=f")
+                    System.out.println("[" + this.myAgent.getLocalName() + "] Pregunta recibida: " + contenido);
+
+                    // Pequeña pausa de 500 ms para simular que el cliente procesa la pregunta
+                    // y para que en la consola se aprecie cómo los dos agentes se intercalan
+                    try {
+                        Thread.sleep(500);
+                    } catch (InterruptedException e) {}
+
+                    // Obtener la respuesta que corresponde a la instancia de este cliente
+                    String miRespuesta = "n";
+                    if (pasoActual < respuestasInstancia.length) {
+                        miRespuesta = respuestasInstancia[pasoActual].trim();
+                        pasoActual++;
+                    }
+
+                    System.out.println("[" + this.myAgent.getLocalName() + "] Respondo: " + miRespuesta);
+
+                    ACLMessage reply = msg.createReply();
+                    reply.setPerformative(ACLMessage.REQUEST);
+                    reply.setContent(miRespuesta);
+                    this.myAgent.send(reply);
+                }
+            }
+        }
+    }
 }

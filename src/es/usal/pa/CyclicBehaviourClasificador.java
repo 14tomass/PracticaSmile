@@ -39,65 +39,64 @@ public class CyclicBehaviourClasificador extends CyclicBehaviour
 	@Override
 	public void action()
 	{
-		// Esperar petición o respuesta de cualquier cliente
-		ACLMessage msg = this.myAgent.blockingReceive(
-				MessageTemplate.and(
-						MessageTemplate.MatchOntology("ontologia"),
-						MessageTemplate.MatchPerformative(ACLMessage.REQUEST)
-				)
+		MessageTemplate template = MessageTemplate.and(
+		        MessageTemplate.MatchOntology("ontologia"),
+		        MessageTemplate.MatchPerformative(ACLMessage.REQUEST)
 		);
+		ACLMessage msg = this.myAgent.receive(template);
+		if (msg != null) {
+		    try {
+				String conversationId = msg.getConversationId();
+				if (conversationId == null) {
+					conversationId = msg.getSender().getName();
+				}
 
-		if (msg == null) {
-			return;
-		}
+				ACLMessage respuestaMsg = msg.createReply();
+				respuestaMsg.setPerformative(ACLMessage.INFORM);
 
-		try {
-			String conversationId = msg.getConversationId();
-			if (conversationId == null) {
-				conversationId = msg.getSender().getName();
-			}
+				// Si no existe la conversación en el mapa, es una nueva petición de clasificación
+				if (!conversaciones.containsKey(conversationId)) {
+					DecisionTreeNavegar2 navegador = new DecisionTreeNavegar2(decisionTree);
+					conversaciones.put(conversationId, navegador);
 
-			ACLMessage respuestaMsg = msg.createReply();
-			respuestaMsg.setPerformative(ACLMessage.INFORM);
-
-			// Si no existe la conversación en el mapa, es una nueva petición de clasificación
-			if (!conversaciones.containsKey(conversationId)) {
-				DecisionTreeNavegar2 navegador = new DecisionTreeNavegar2(decisionTree);
-				conversaciones.put(conversationId, navegador);
-
-				// Enviar la pregunta del nodo raíz (ej. odor=f)
-				String primeraPregunta = navegador.condicionActual();
-				respuestaMsg.setContentObject(primeraPregunta);
-				this.myAgent.send(respuestaMsg);
-			} else {
-				// Conversación en curso: recibir respuesta sí/no del cliente y avanzar por el árbol
-				DecisionTreeNavegar2 navegador = conversaciones.get(conversationId);
-				String respuestaCliente = (String) msg.getContentObject();
-
-				boolean irRamaIzquierda = respuestaCliente != null &&
-						(respuestaCliente.trim().equalsIgnoreCase("s") ||
-						 respuestaCliente.trim().equalsIgnoreCase("si") ||
-						 respuestaCliente.trim().equalsIgnoreCase("sí"));
-
-				navegador.navegarNodo(irRamaIzquierda);
-
-				// Comprobar si hemos llegado a un nodo hoja (nodo de decisión final)
-				if (navegador.esNodoDecision()) {
-					String clasificacionFinal = navegador.getClasificacion("class");
-					// Eliminar la conversación del mapa porque ya ha terminado esta seta
-					conversaciones.remove(conversationId);
-
-					respuestaMsg.setContentObject(clasificacionFinal);
+					// Enviar la pregunta del nodo raíz (ej. odor=f)
+					String primeraPregunta = navegador.condicionActual();
+					respuestaMsg.setContent(primeraPregunta);
 					this.myAgent.send(respuestaMsg);
 				} else {
-					// Todavía es un nodo interno: enviar la siguiente pregunta
-					String siguientePregunta = navegador.condicionActual();
-					respuestaMsg.setContentObject(siguientePregunta);
-					this.myAgent.send(respuestaMsg);
+					// Conversación en curso: recibir respuesta sí/no del cliente y avanzar por el árbol
+					DecisionTreeNavegar2 navegador = conversaciones.get(conversationId);
+					String respuestaCliente = msg.getContent();
+
+					boolean irRamaIzquierda = respuestaCliente != null &&
+							(respuestaCliente.trim().equalsIgnoreCase("s") ||
+							 respuestaCliente.trim().equalsIgnoreCase("si") ||
+							 respuestaCliente.trim().equalsIgnoreCase("sí"));
+
+					navegador.navegarNodo(irRamaIzquierda);
+
+					// Comprobar si hemos llegado a un nodo hoja (nodo de decisión final)
+					if (navegador.esNodoDecision()) {
+						String clasificacionFinal = navegador.getClasificacion("class");
+						// Eliminar la conversación del mapa porque ya ha terminado esta seta
+						conversaciones.remove(conversationId);
+
+						respuestaMsg.setContent(clasificacionFinal);
+						this.myAgent.send(respuestaMsg);
+					} else {
+						// Todavía es un nodo interno: enviar la siguiente pregunta
+						String siguientePregunta = navegador.condicionActual();
+						respuestaMsg.setContent(siguientePregunta);
+						this.myAgent.send(respuestaMsg);
+					}
 				}
-			}
-		} catch (UnreadableException | IOException e) {
-			e.printStackTrace();
+		    } catch (Exception e) {
+		        e.printStackTrace();
+		    }
+		} else {
+		    // Si no hay mensajes en la cola, dormimos el comportamiento
+		    block();
 		}
+		
 	}
 }
